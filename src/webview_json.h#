@@ -1,0 +1,222 @@
+use "std -> strbuf" from "strbuf"
+
+fn join(parts: [string]) -> string is
+    let mut sb = strbuf::new()
+    let mut i: int = 0
+    while i < array_len(parts) is
+        sb.push(parts[i])
+        i += 1
+    end
+    return sb.build()
+end
+
+;; byte at i, -1 outside
+fn ch(s: string, i: int) -> int is
+    if i < 0 || i >= string_len(s) is return -1 end
+    let c: string = string_at(s, i)
+    if c == "" is return -1 end
+    return __builtin_str_to_char_code(c)
+end
+
+fn skip_ws(s: string, i: int) -> int is
+    let mut p: int = i
+    while true is
+        let c: int = ch(s, p)
+        if c == 32 || c == 9 || c == 10 || c == 13 is p += 1 else is return p end
+    end
+    return p
+end
+
+;; s[i] == '"'. Index just after the closing quote, or -1.
+fn string_end(s: string, i: int) -> int is
+    let mut p: int = i + 1
+    while true is
+        let c: int = ch(s, p)
+        if c == -1 is return -1 end
+        if c == 34 is return p + 1 end
+        if c == 92 is p += 2 else is p += 1 end
+    end
+    return -1
+end
+
+;; Index just after the value starting at i.
+fn value_end(s: string, i: int) -> int is
+    let c: int = ch(s, i)
+    if c == -1 is return -1 end
+    if c == 34 is return string_end(s, i) end
+    if c == 123 || c == 91 is
+        let mut depth: int = 0
+        let mut p: int = i
+        while true is
+            let d: int = ch(s, p)
+            if d == -1 is return -1 end
+            if d == 34 is
+                let e: int = string_end(s, p)
+                if e < 0 is return -1 end
+                p = e
+                continue
+            end
+            if d == 123 || d == 91 is
+                depth += 1
+            elsif d == 125 || d == 93 is
+                depth -= 1
+                if depth == 0 is return p + 1 end
+            end
+            p += 1
+        end
+    end
+    let mut q: int = i
+    while true is
+        let d: int = ch(s, q)
+        if d == -1 || d == 44 || d == 125 || d == 93 || d == 32 || d == 9 || d == 10 || d == 13 is return q end
+        q += 1
+    end
+    return q
+end
+
+;; Raw JSON text of every element of a top-level array. "[]" or non-array -> [].
+pub fn items(raw: string) -> [string] is
+    let mut out: [string] = []
+    let mut p: int = skip_ws(raw, 0)
+    if ch(raw, p) != 91 is return out end
+    p = skip_ws(raw, p + 1)
+    while true is
+        let c: int = ch(raw, p)
+        if c == -1 || c == 93 is break end
+        let e: int = value_end(raw, p)
+        if e < 0 is break end
+        out = array_push(out, string_slice(raw, p, e))
+        p = skip_ws(raw, e)
+        if ch(raw, p) == 44 is p = skip_ws(raw, p + 1) end
+    end
+    return out
+end
+
+pub fn count(raw: string) -> int is return array_len(items(raw)) end
+
+pub fn item(raw: string, idx: int) -> string is
+    let xs: [string] = items(raw)
+    if idx < 0 || idx >= array_len(xs) is return "null" end
+    return xs[idx]
+end
+
+fn hexv(c: int) -> int is
+    if c >= 48 && c <= 57 is return c - 48 end
+    if c >= 97 && c <= 102 is return c - 87 end
+    if c >= 65 && c <= 70 is return c - 55 end
+    return -1
+end
+
+;; value of the first 4 hex digits of s, or -1
+fn hex4(s: string) -> int is
+    if string_len(s) < 4 is return -1 end
+    let mut v: int = 0
+    let mut i: int = 0
+    while i < 4 is
+        let d: int = hexv(ch(s, i))
+        if d < 0 is return -1 end
+        v = v * 16 + d
+        i += 1
+    end
+    return v
+end
+
+;; Body of a JSON string (no surrounding quotes) -> plain text.
+pub fn unescape(raw: string) -> string is
+    if !string_contains(raw, "\\") is return raw end
+    let sent: string = "\x01\x02\x03"
+    let mut t: string = string_replace(raw, "\\\\", sent)
+    t = string_replace(t, "\\\"", "\"")
+    t = string_replace(t, "\\n", "\n")
+    t = string_replace(t, "\\r", "\r")
+    t = string_replace(t, "\\t", "\t")
+    t = string_replace(t, "\\/", "/")
+    t = string_replace(t, "\\b", "\x08")
+    t = string_replace(t, "\\f", "\x0c")
+    if string_contains(t, "\\u") is
+        let parts: [string] = string_split(t, "\\u")
+        let np: int = array_len(parts)
+        let mut out: [string] = [parts[0]]
+        let mut i: int = 1
+        while i < np is
+            let part: string = parts[i]
+            let code: int = hex4(part)
+            if code < 0 is
+                out = array_push(out, "\\u" + part)
+            else is
+                let mut rest: string = string_slice(part, 4, string_len(part))
+                let mut cp: int = code
+                if code >= 55296 && code <= 56319 && rest == "" && i + 1 < np is
+                    let lo: int = hex4(parts[i + 1])
+                    if lo >= 56320 && lo <= 57343 is
+                        cp = 65536 + (code - 55296) * 1024 + (lo - 56320)
+                        let nxt: string = parts[i + 1]
+                        rest = string_slice(nxt, 4, string_len(nxt))
+                        i += 1
+                    end
+                end
+                if cp > 0 is out = array_push(out, __builtin_char_code_to_str(cp)) end
+                out = array_push(out, rest)
+            end
+            i += 1
+        end
+        t = join(out)
+    end
+    return string_replace(t, sent, "\\")
+end
+
+;; Raw JSON string value (with quotes) -> text. Anything else is returned as-is (numbers, true...).
+pub fn to_str(raw: string) -> string is
+    let p: int = skip_ws(raw, 0)
+    if ch(raw, p) != 34 is return raw end
+    let e: int = string_end(raw, p)
+    if e < 0 is return "" end
+    return unescape(string_slice(raw, p + 1, e - 1))
+end
+
+;; Integer part of a raw JSON number; 0 when it is not a number.
+pub fn to_int(raw: string) -> int is
+    let mut p: int = skip_ws(raw, 0)
+    let mut neg: bool = false
+    if ch(raw, p) == 45 is
+        neg = true
+        p += 1
+    end
+    let mut v: int = 0
+    while true is
+        let c: int = ch(raw, p)
+        if c < 48 || c > 57 is break end
+        v = v * 10 + (c - 48)
+        p += 1
+    end
+    if neg is return 0 - v end
+    return v
+end
+
+pub fn to_bool(raw: string) -> bool is
+    return string_slice(raw, skip_ws(raw, 0), skip_ws(raw, 0) + 4) == "true"
+end
+
+fn hex_digit(n: int) -> string is
+    return string_slice("0123456789abcdef", n, n + 1)
+end
+
+;; text -> JSON string literal with quotes. Bytes >= 0x80 (UTF-8) pass through untouched.
+pub fn quote(s: string) -> string is
+    let mut t: string = string_replace(s, "\\", "\\\\")
+    t = string_replace(t, "\"", "\\\"")
+    t = string_replace(t, "\n", "\\n")
+    t = string_replace(t, "\r", "\\r")
+    t = string_replace(t, "\t", "\\t")
+    let mut c: int = 1
+    while c < 32 is
+        if c != 9 && c != 10 && c != 13 is
+            let k: string = __builtin_char_code_to_str(c)
+            if string_contains(t, k) is
+                t = string_replace(t, k, "\\u00" + hex_digit(c / 16) + hex_digit(c % 16))
+            end
+        end
+        c += 1
+    end
+    return "\"" + t + "\""
+end
