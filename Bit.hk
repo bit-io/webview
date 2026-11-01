@@ -1,1 +1,28 @@
+[package]
+-> name        => webview
+-> version     => 0.1.0
+-> description => Bindingi H# do webview/webview (okno z silnikiem przegladarki) przez extern static
+-> authors     => ["Bit Developers"]
+-> license     => MIT
+-> lang        => h#
 
+[edition]
+-> edition => 2026
+
+[layout]
+-> src => src
+
+[build]
+-> link => static
+-> native          => sh native/build.sh
+-> native-lib-path => native
+-> native-skip-if  => native/libhwebview.a
+
+[lib]
+-> output => hlib
+
+[pack]
+-> contents    => [hlib, sources, docs]
+-> compression => zstd
+
+[dependencies]
