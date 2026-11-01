@@ -1,0 +1,36 @@
+use "bit -> webview" from "webview"
+
+;; Worker thread: one tick per second (next() times out), plus the "reset" call from JS.
+async fn ticker(w: webview::Webview) -> int is
+    let mut ticks: int = 0
+    let mut go: bool = true
+    while go is
+        let ev: webview::Event = webview::next(w, 1000)
+        if ev.kind < 0 is
+            go = false
+        elsif ev.kind == 0 is
+            ticks += 1
+            webview::eval_js(w, "document.getElementById('t').textContent = " + webview::quote("tick " + to_string(ticks)))
+        elsif ev.name == "reset" is
+            ticks = 0
+            webview::respond(w, ev.id, true, "0")
+        end
+    end
+    return ticks
+end
+
+fn main() is
+    let w: webview::Webview = webview::open(false)
+    if !webview::is_valid(w) is
+        println("cannot create the window")
+        return
+    end
+    webview::set_window_title(w, "ticker")
+    webview::set_window_size(w, 360, 160, webview::hint_fixed())
+    webview::bind_raw(w, "reset")
+    webview::load_html(w, "<body style='font-family:sans-serif;margin:2rem'><h2 id='t'>tick 0</h2><button onclick='reset()'>reset</button></body>")
+    let worker = ticker(w)
+    webview::run_ui(w)
+    await worker
+    webview::close(w)
+end
