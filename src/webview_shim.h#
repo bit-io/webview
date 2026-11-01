@@ -1,0 +1,24 @@
+extern static [c, "hwebview"] is
+    fn hwv_open(debug: i32) -> int
+    fn hwv_handle(h: int) -> int
+    fn hwv_run(h: int) -> i32
+    fn hwv_terminate(h: int) -> i32
+    fn hwv_destroy(h: int) -> i32
+    fn hwv_bind(h: int, name: string) -> i32
+    fn hwv_unbind(h: int, name: string) -> i32
+    fn hwv_return(h: int, id: string, status: i32, result: string) -> i32
+    fn hwv_next(h: int, timeout_ms: i32) -> int
+    fn hwv_ev_name(ev: int) -> string
+    fn hwv_ev_id(ev: int) -> string
+    fn hwv_ev_req(ev: int) -> string
+    fn hwv_ev_free(ev: int)
+    fn hwv_post_title(h: int, title: string) -> i32
+    fn hwv_post_size(h: int, width: i32, height: i32, hint: i32) -> i32
+    fn hwv_post_navigate(h: int, url: string) -> i32
+    fn hwv_post_html(h: int, html: string) -> i32
+    fn hwv_post_init(h: int, js: string) -> i32
+    fn hwv_post_eval(h: int, js: string) -> i32
+    fn hwv_post_bind(h: int, name: string) -> i32
+    fn hwv_post_unbind(h: int, name: string) -> i32
+    fn hwv_version() -> string
+end
