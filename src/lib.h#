@@ -1,1 +1,215 @@
+mod webview_json
+mod webview_shim
+mod webview_sys
 
+pub fn lib_version() -> string is return "0.1.0" end
+
+;; version of the linked libwebview
+pub fn native_version() -> string is return hwv_version() end
+
+;; ---- types --------------------------------------------------------------------------------
+
+;; What a bound function returns. `json` must be valid JSON; ok=false rejects the JS promise.
+pub struct Reply is
+    pub ok: bool
+    pub json: string
+end
+
+;; One item from next(): kind 1 = JS call, 0 = timeout, -1 = window closed.
+pub struct Event is
+    pub kind: int
+    pub name: string
+    pub id: string
+    pub req: string
+end
+
+pub struct Webview is
+    pub h: int
+    pub names: [string]
+    pub handlers: [fn(string) -> Reply]
+end
+
+;; ---- helpers for handlers -----------------------------------------------------------------
+
+pub fn hint_none() -> int is return 0 end
+pub fn hint_min() -> int is return 1 end
+pub fn hint_max() -> int is return 2 end
+pub fn hint_fixed() -> int is return 3 end
+
+pub fn reply_json(json: string) -> Reply is return Reply { ok: true, json: json } end
+pub fn reply_null() -> Reply is return Reply { ok: true, json: "null" } end
+pub fn reply_str(s: string) -> Reply is return Reply { ok: true, json: webview_json::quote(s) } end
+pub fn reply_int(n: int) -> Reply is return Reply { ok: true, json: to_string(n) } end
+pub fn reply_bool(b: bool) -> Reply is
+    if b is return Reply { ok: true, json: "true" } end
+    return Reply { ok: true, json: "false" }
+end
+;; rejects the JS promise with `msg` as a string
+pub fn reply_err(msg: string) -> Reply is return Reply { ok: false, json: webview_json::quote(msg) } end
+
+;; `req` is the JSON array of JS arguments, e.g. ["hello",42]
+pub fn arg_count(req: string) -> int is return webview_json::count(req) end
+pub fn arg_raw(req: string, i: int) -> string is return webview_json::item(req, i) end
+pub fn arg_str(req: string, i: int) -> string is return webview_json::to_str(webview_json::item(req, i)) end
+pub fn arg_int(req: string, i: int) -> int is return webview_json::to_int(webview_json::item(req, i)) end
+pub fn arg_bool(req: string, i: int) -> bool is return webview_json::to_bool(webview_json::item(req, i)) end
+;; text -> JSON/JS string literal (use it whenever you splice data into eval_js)
+pub fn quote(s: string) -> string is return webview_json::quote(s) end
+
+;; ---- window ---------------------------------------------------------------------------------
+
+;; Returns a Webview with h == 0 when the native window could not be created.
+pub fn open(debug: bool) -> Webview is
+    let mut d: i32 = 0
+    if debug is d = 1 end
+    let w: Webview = Webview { h: hwv_open(d), names: [], handlers: [] }
+    return w
+end
+
+pub fn is_valid(w: Webview) -> bool is return w.h != 0 end
+
+;; the raw webview_t, to mix with the webview_sys bindings (UI thread only)
+pub fn raw_handle(w: Webview) -> int is return hwv_handle(w.h) end
+
+pub fn set_window_title(w: Webview, title: string) -> int is
+    let rc: i32 = hwv_post_title(w.h, title)
+    return rc as int
+end
+
+pub fn set_window_size(w: Webview, width: int, height: int, hint: int) -> int is
+    let rc: i32 = hwv_post_size(w.h, width as i32, height as i32, hint as i32)
+    return rc as int
+end
+
+pub fn load_url(w: Webview, url: string) -> int is
+    let rc: i32 = hwv_post_navigate(w.h, url)
+    return rc as int
+end
+
+pub fn load_html(w: Webview, html: string) -> int is
+    let rc: i32 = hwv_post_html(w.h, html)
+    return rc as int
+end
+
+;; JS that runs on every page load, before the page's own scripts
+pub fn init_js(w: Webview, js: string) -> int is
+    let rc: i32 = hwv_post_init(w.h, js)
+    return rc as int
+end
+
+pub fn eval_js(w: Webview, js: string) -> int is
+    let rc: i32 = hwv_post_eval(w.h, js)
+    return rc as int
+end
+
+;; Binds window.<name>(...) in JS. The closure gets the JSON array of arguments and runs on the
+;; worker thread. Returns 1 (DUPLICATE) if the name is already bound by this Webview.
+pub fn bind_fn(w: Webview, name: string, f: fn(string) -> Reply) -> int is
+    let mut i: int = 0
+    while i < array_len(w.names) is
+        if w.names[i] == name is return 1 end
+        i += 1
+    end
+    w.names = array_push(w.names, name)
+    w.handlers = array_push(w.handlers, f)
+    let rc: i32 = hwv_post_bind(w.h, name)
+    return rc as int
+end
+
+;; Binds window.<name> but leaves answering to you (use with next()/respond()).
+pub fn bind_raw(w: Webview, name: string) -> int is
+    let rc: i32 = hwv_post_bind(w.h, name)
+    return rc as int
+end
+
+pub fn unbind_fn(w: Webview, name: string) -> int is
+    let rc: i32 = hwv_post_unbind(w.h, name)
+    return rc as int
+end
+
+;; ---- manual event loop (advanced) ---------------------------------------------------------------
+
+;; Waits up to timeout_ms (-1 = forever) for a JS call. Copies the strings out of native memory.
+pub fn next(w: Webview, timeout_ms: int) -> Event is
+    let ev: int = hwv_next(w.h, timeout_ms as i32)
+    if ev < 0 is return Event { kind: -1, name: "", id: "", req: "" } end
+    if ev == 0 is return Event { kind: 0, name: "", id: "", req: "" } end
+    let name: string = hwv_ev_name(ev) + ""
+    let id: string = hwv_ev_id(ev) + ""
+    let req: string = hwv_ev_req(ev) + ""
+    hwv_ev_free(ev)
+    return Event { kind: 1, name: name, id: id, req: req }
+end
+
+;; Answers the JS call `id`. Safe from any thread. `json` must be valid JSON.
+pub fn respond(w: Webview, id: string, ok: bool, json: string) -> int is
+    let mut st: i32 = 0
+    if !ok is st = 1 end
+    let rc: i32 = hwv_return(w.h, id, st, json)
+    return rc as int
+end
+
+pub fn respond_reply(w: Webview, id: string, r: Reply) -> int is
+    return respond(w, id, r.ok, r.json)
+end
+
+;; ---- run ------------------------------------------------------------------------------------------
+
+fn serve_one(w: Webview, name: string, id: string, req: string) is
+    let mut found: int = -1
+    let mut i: int = 0
+    while i < array_len(w.names) is
+        if w.names[i] == name is found = i end
+        i += 1
+    end
+    if found < 0 is
+        respond(w, id, false, webview_json::quote("no handler bound for " + name))
+        return
+    end
+    let f: fn(string) -> Reply = w.handlers[found]
+    let r: Reply = f(req)
+    respond(w, id, r.ok, r.json)
+end
+
+;; worker thread: runs until the window is closed and the queue is drained
+async fn pump(w: Webview) -> int is
+    let mut handled: int = 0
+    let mut go: bool = true
+    while go is
+        let ev: Event = next(w, 250)
+        if ev.kind < 0 is
+            go = false
+        elsif ev.kind > 0 is
+            serve_one(w, ev.name, ev.id, ev.req)
+            handled += 1
+        end
+    end
+    return handled
+end
+
+;; UI loop only; blocks until the window closes. You must answer calls yourself (next/respond).
+pub fn run_ui(w: Webview) -> int is
+    let rc: i32 = hwv_run(w.h)
+    return rc as int
+end
+
+;; Blocks until the window closes. Serves closures registered with bind() on a worker thread.
+pub fn serve(w: Webview) -> int is
+    let worker = pump(w)
+    let rc: i32 = hwv_run(w.h)
+    await worker
+    return rc as int
+end
+
+;; Safe from any thread; makes run() return.
+pub fn stop(w: Webview) -> int is
+    let rc: i32 = hwv_terminate(w.h)
+    return rc as int
+end
+
+;; Call once, from the UI thread, after run()/run_ui() returned.
+pub fn close(w: Webview) -> int is
+    let rc: i32 = hwv_destroy(w.h)
+    w.h = 0
+    return rc as int
+end
