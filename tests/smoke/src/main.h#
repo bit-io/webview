@@ -1,0 +1,51 @@
+use "bit -> webview" from "webview"
+
+fn check(name: string, got: string, want: string) -> int is
+    if got == want is
+        println("ok   " + name)
+        return 0
+    end
+    println("FAIL " + name + ": got [" + got + "] want [" + want + "]")
+    return 1
+end
+
+fn main() is
+    let mut bad: int = 0
+    ;; --- JSON helpers ---
+    let req: string = "[\"he\\\"llo\\u00e9\", 42, true, {\"a\":[1,2]}, \"x,y\"]"
+    bad += check("count", to_string(webview::arg_count(req)), "5")
+    bad += check("str+escape", webview::arg_str(req, 0), "he\"lloé")
+    bad += check("int", to_string(webview::arg_int(req, 1)), "42")
+    bad += check("bool", to_string(webview::arg_bool(req, 2)), "true")
+    bad += check("object raw", webview::arg_raw(req, 3), "{\"a\":[1,2]}")
+    bad += check("comma in str", webview::arg_str(req, 4), "x,y")
+    bad += check("missing arg", webview::arg_raw(req, 9), "null")
+    bad += check("neg int", to_string(webview::arg_int("[-17]", 0)), "-17")
+    bad += check("quote", webview::quote("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"")
+    bad += check("surrogate", webview::arg_str("[\"\\ud83d\\ude00\"]", 0), "😀")
+    bad += check("empty", to_string(webview::arg_count("[]")), "0")
+
+    ;; --- window against the mock libwebview ---
+    println("native " + webview::native_version())
+    let w: webview::Webview = webview::open(true)
+    if !webview::is_valid(w) is
+        println("FAIL create")
+        return
+    end
+    webview::set_window_title(w, "Smoke")
+    webview::set_window_size(w, 640, 480, webview::hint_fixed())
+    webview::load_html(w, "<b>hi</b>")
+    webview::bind_fn(w, "greet", |r: string| -> webview::Reply is
+        return webview::reply_str("hi " + webview::arg_str(r, 0))
+    end)
+    webview::bind_fn(w, "boom", |r: string| -> webview::Reply is
+        return webview::reply_err("nope " + to_string(webview::arg_int(r, 1)))
+    end)
+    bad += check("duplicate bind", to_string(webview::bind_fn(w, "greet", |r: string| -> webview::Reply is
+        return webview::reply_null()
+    end)), "1")
+    let rc: int = webview::serve(w)
+    bad += check("run rc", to_string(rc), "0")
+    webview::close(w)
+    if bad == 0 is println("ALL OK") else is println("FAILURES: " + to_string(bad)) end
+end
