@@ -1,0 +1,38 @@
+use "bit -> webview" from "webview"
+
+fn page() -> string is
+    let mut h: string = "<!doctype html><meta charset='utf-8'>"
+    h = h + "<body style='font-family:sans-serif;margin:2rem'>"
+    h = h + "<h1>H# + webview</h1>"
+    h = h + "<input id='n' value='world'> "
+    h = h + "<button onclick='greet(n.value).then(r => out.textContent = r)'>greet</button> "
+    h = h + "<button onclick='add(2, 3).then(r => out.textContent = \"2 + 3 = \" + r)'>add</button> "
+    h = h + "<button onclick='fail().catch(e => out.textContent = \"rejected: \" + e)'>fail</button>"
+    h = h + "<p id='out'></p></body>"
+    return h
+end
+
+fn main() is
+    let w: webview::Webview = webview::open(true)
+    if !webview::is_valid(w) is
+        println("cannot create the window (is GTK/WebKit available?)")
+        return
+    end
+    webview::set_window_title(w, "H# + webview")
+    webview::set_window_size(w, 520, 320, webview::hint_none())
+
+    ;; JS: await greet("x")  — the closure gets the JSON array of arguments
+    webview::bind_fn(w, "greet", |req: string| -> webview::Reply is
+        return webview::reply_str("Hello, " + webview::arg_str(req, 0) + "!")
+    end)
+    webview::bind_fn(w, "add", |req: string| -> webview::Reply is
+        return webview::reply_int(webview::arg_int(req, 0) + webview::arg_int(req, 1))
+    end)
+    webview::bind_fn(w, "fail", |req: string| -> webview::Reply is
+        return webview::reply_err("something went wrong in H#")
+    end)
+
+    webview::load_html(w, page())
+    webview::serve(w)
+    webview::close(w)
+end
