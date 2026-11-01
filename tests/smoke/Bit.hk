@@ -1,0 +1,9 @@
+[package]
+-> name => webview-smoke
+-> version => 0.1.0
+
+[dependencies]
+-> webview => newest
+
+[build]
+-> flags => --dynamic
