@@ -1,0 +1,18 @@
+[package]
+-> name        => webview-hello
+-> version     => 0.1.0
+-> description => window + two JS functions backed by H# closures
+-> lang        => h#
+
+[layout]
+-> src => src
+
+[build]
+-> entry  => src/main.h#
+-> output => build/webview-hello
+-> emit   => bin
+! GTK/WebKit cannot be linked into a static musl binary
+-> flags  => --dynamic
+
+[dependencies]
+-> webview => newest
