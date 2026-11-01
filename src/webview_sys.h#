@@ -1,0 +1,19 @@
+extern static [c, "webview"] is
+    fn webview_create(debug: i32, window: int) -> int
+    fn webview_destroy(w: int) -> i32
+    fn webview_run(w: int) -> i32
+    fn webview_terminate(w: int) -> i32
+    fn webview_dispatch(w: int, cb: int, arg: int) -> i32
+    fn webview_get_window(w: int) -> int
+    fn webview_get_native_handle(w: int, kind: i32) -> int
+    fn webview_set_title(w: int, title: string) -> i32
+    fn webview_set_size(w: int, width: i32, height: i32, hints: i32) -> i32
+    fn webview_navigate(w: int, url: string) -> i32
+    fn webview_set_html(w: int, html: string) -> i32
+    fn webview_init(w: int, js: string) -> i32
+    fn webview_eval(w: int, js: string) -> i32
+    fn webview_bind(w: int, name: string, cb: int, arg: int) -> i32
+    fn webview_unbind(w: int, name: string) -> i32
+    fn webview_return(w: int, id: string, status: i32, result: string) -> i32
+    fn webview_version() -> int
+end
