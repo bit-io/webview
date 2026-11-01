@@ -1,0 +1,17 @@
+[package]
+-> name        => webview-counter
+-> version     => 0.1.0
+-> description => manual event loop: push updates from H# to the page with eval_js
+-> lang        => h#
+
+[layout]
+-> src => src
+
+[build]
+-> entry  => src/main.h#
+-> output => build/webview-counter
+-> emit   => bin
+-> flags  => --dynamic
+
+[dependencies]
+-> webview => newest
