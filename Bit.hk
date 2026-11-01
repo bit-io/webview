@@ -3,7 +3,7 @@
 -> version     => 0.1.0
 -> description => Bindingi H# do webview/webview (okno z silnikiem przegladarki) przez extern static
 -> authors     => ["Bit Developers"]
--> license     => MIT
+-> license     => GPL-3.0
 -> lang        => h#
 
 [edition]
